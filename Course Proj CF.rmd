@@ -1,0 +1,132 @@
+---
+output: 
+pdf_document: 
+fig_width: 5
+fig_height: 5
+---
+---
+```{r setup, include=FALSE}
+chooseCRANmirror(graphics=FALSE, ind=1)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=7, fig.height=7) 
+```
+<center>
+**Machine Learning Course Project**
+<br>
+**How Well Are You Exercising?:**
+**(Tracking Physical Movement To Determine if Exercise Is Being Performed Effectively)**
+</center>
+<br>
+<center><span style="color:red">**Executive Summary**</span></center>
+###### Using data from accelerometers, the physical activity of 6 participants were analyzed to determine whether they performed certain physical activities in the correct manner. To answer this question, various models were fitted on data from the Human Activity Recognition (HAR) dataset. 
+###### The data was first split into a training set and a testing set. The training data was further split into two parts. The data were cleaned to remove variables that were of no significance to the model and those that provided little prediction value in terms of variability. After cleaning the data, the training dataset (and the testing set) consisted of 52 predictor variables. 
+###### A decision tree and a random forest model were tested on the training data. The decision tree yielded an accuracy reading of 0.49, while the random forest yielded an accuracy reading of 0.99. Because the random forest yielded a higher accuracy reading, it was selected for the final model to run the testing set on. Results from the final model are below. 
+###### **Response Variable Key**
+###### A = exactly according to the specification
+###### B = throwing the elbows to the front
+###### c = lifting the dumbbell only halfway
+###### D = lowering the dumbbells only halfway
+###### E = throwing the hips to the front
+```{r lib, echo=TRUE,fig.cap="Miles per gallon", message=FALSE}
+wd<-setwd("C:/Users/c ford/Documents/Machine Learning/finalproject")
+setwd("C:/Users/c ford/Documents/Machine Learning/finalproject")
+
+library(corrplot)
+library(caret)
+library(ggplot2)
+library(rattle)
+library(e1071)
+library(randomForest)
+```
+<center><span style="color:red">**Data Download and Cleaning**</span></center>
+###### First, I downloaded the training and testing sets from their respective websites, and I read the CSV datasets into R.
+``` {r download,echo=TRUE, message=FALSE} 
+#training
+if(!file.exists("training.csv"))
+  { download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","training.csv")}
+
+#testing
+if(!file.exists("testing.csv"))
+{download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","testing.csv")}
+
+training<-read.csv("training.csv")
+testing<-read.csv("testing.csv")
+```
+###### In this piece of code, I removed variables with missing values and those that are meaningless in terms of providing predictive value to the model. I also rename the testing variable from 'problem_id' to 'classe' so that it matches with the training set variable name.
+```{r clean, echo=TRUE, message=FALSE}
+
+#testing subset
+na<-is.na(testing[1,])
+testing1<-testing[,!na]
+
+#training subset
+training1<-training[training$new_window=="no",]
+training1<-training1[,!na]
+
+#Remove variables you don't want in the model (those with meaningless prediction value, at least for this model)
+training1<-training1[,-c(1:7)]
+testing1<-testing1[,-c(1:7)]
+
+#rename testing variable
+testing1$classe<-testing1$problem_id
+testing1<-testing1[,-c(53)]
+```
+###### I also use the nearzero function to remove variables without any variability as they lack predictive value (none were actually removed but it is important to check for this).
+```{r near, echo=TRUE, message=FALSE}
+nearzero<-as.data.frame(nearZeroVar(training1,saveMetrics = TRUE))
+nearzero<-nearzero[nearzero$nzv=="FALSE",]
+nearzero<-rownames(nearzero)
+training1<-training1[,nearzero]
+testing1<-testing1[,nearzero]
+```
+<center><span style="color:red">**Correlation Matrix**</span></center>
+###### I also ran a correlation matrix on the training set data to get a better sense of which variables are linearly correlated with each other. Usually this process can lead to the removal of variables with high collinearity or to the creation of a new variable that captures the variability of multiple collinear variables (principal components analysis), but none of those actions were taken.
+###### Analysis of the correlation matrix shows that a substantial share of the variable pairs - 2532 - are not well correlated (under 0.5), and 44 pairs are highly correlated. 
+``` {r cor, echo=TRUE, message=FALSE}
+m<-cor(training1[,c(-53)])
+diag(m)<-0
+high<-length(which(m >= 0.800000000001,arr.ind=TRUE))
+low<-length(which(m > 0.000000000 & m < 0.5000000000001,arr.ind=TRUE))
+high
+low
+corrplot(m)
+```
+<center><span style="color:red">**Splitting Training Set**</span></center>
+###### Next, I split the training set into two parts to run my models on.
+``` {r split, echo=TRUE, message=FALSE}
+intraining1<-createDataPartition(training1$classe,p=0.5,list=FALSE)
+train1<-training1[intraining1,]
+train2<-training1[-intraining1,]
+```
+<center><span style="color:red">**Model Fit One: Classification Tree**</span></center>
+###### A basic classification tree model using the method="rpart" model is used to fit the data. A decision tree was chosen for its interpretability and for its ability to partition data into many spaces that aren't necessarily linearly related. This is in contrast to a logistic-based model which only allows for one linear decision boundary. 
+###### A classification tree was used (rather than a regression tree) because the outcome, 'classe', is discrete, not continuous. The drawbacks of a decision tree is that it may lead to overfitting. But cross validation is also used to help control for overfitting. 
+###### Results for this model show an accuracy rate of 0.49, which isn't vary high. We will explore other models. 
+``` {r dt, echo=TRUE, message=FALSE}
+set.seed(1965) 
+tree_fit<-train(classe ~ . , data=train1, method="rpart", trControl=trainControl(method="cv",number=10))
+print(tree_fit)
+fancyRpartPlot(tree_fit$finalModel)
+tree_fit1<-predict(tree_fit, newdata=train2) 
+confusionMatrix(tree_fit1,as.factor(train2$classe)) 
+```
+<center><span style="color:red">**Model Two: Random Forest Tree**</span></center>
+###### A random forest model was used on the data. The advantage of a random forest is that it can provide improved accuracy over a basic decision tree or a bagged tree as it bootstraps the data and variables across a large number of trees and averages the results. The drawback often cited with random forest models is the overfitting risk. Cross validation is incorporated in the model to help control for overfitting (k-fold=10).
+###### The random forest model results show a 0.99 accuracy reading. For this reason, the random forest will be used to predict the classe variable in the testing set.
+```{r rf, echo=TRUE, message=FALSE}
+rf_fit<-train(classe ~ . , data=train1, method="rf", trControl=trainControl(method="cv",number=10))
+print(rf_fit)
+rf_fit1<-predict(rf_fit, newdata=train2) 
+confusionMatrix(rf_fit1,as.factor(train2$classe))
+```
+<center><span style="color:red">**Random Forest Model Prediction on Testing Data**</span></center>
+###### The random forest model is used on the testing data and the "classe" variable results are stored in the variable modelfittest.
+``` {r mft, echo=TRUE, message=FALSE}
+modelfittest<-predict(rf_fit, newdata=testing1)
+modelfittest
+```
+<center><span style="color:red">**Concluding Remarks**</span></center>
+###### The classification decision tree produced an accuracy of 0.49, therefore the out-of-sample error for this model is approximately 0.51. The random forest out-of-sample error is much lower at approximately 0.01 (with an accuracy rate of .99). Although the random forest model produces a low out-of-sample error for the training set, it will be higher for the testing set, due to overfitting. 
+
+
+
